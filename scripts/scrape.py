@@ -32,16 +32,56 @@ UA = (
 BC_BASE = "https://www.barchart.com"
 PROXY = f"{BC_BASE}/proxies/core-api/v1/options/get"
 
-# Watchlist seed — names with active retail/options flow that are good candidates
-# for gamma-squeeze screening. Universe is unioned with barchart's most-active
-# list at runtime, so this is just a guaranteed-coverage fallback.
-SEED_TICKERS = [
-    "GME", "AMC", "PLTR", "HOOD", "MARA", "RIOT", "CVNA", "SOFI",
-    "AFRM", "RIVN", "LCID", "BYND", "TSLA", "NVDA", "AMD", "MU",
-    "META", "AAPL", "MSFT", "AMZN", "GOOGL", "NFLX", "COIN", "SMCI",
-    "DKNG", "ROKU", "SHOP", "SNAP", "UBER", "PYPL", "ARM", "BABA",
-    "F", "GM", "INTC", "BAC", "T", "PFE", "WBD", "DIS",
-]
+# Watchlist seed — categorized so the front-end can filter / colour-code.
+# Universe is unioned with barchart's most-active list at runtime, so this
+# is the floor of what's always covered, not a ceiling.
+SEED: dict[str, str] = {
+    # ── Index & broad ETFs (huge dealer gamma books) ─────────────────────
+    "SPY": "Index ETF", "QQQ": "Index ETF", "IWM": "Index ETF",
+    "DIA": "Index ETF", "VOO": "Index ETF", "VTI": "Index ETF",
+    # Bonds & rates
+    "TLT": "Bond ETF", "HYG": "Bond ETF", "LQD": "Bond ETF",
+    # Sector ETFs
+    "XLF": "Sector ETF", "XLE": "Sector ETF", "XLK": "Sector ETF",
+    "XLV": "Sector ETF", "XLI": "Sector ETF", "XLY": "Sector ETF",
+    "XBI": "Sector ETF", "SMH": "Sector ETF", "SOXX": "Sector ETF",
+    "ARKK": "Sector ETF", "IBIT": "Sector ETF",
+    # Commodities
+    "GLD": "Commodity ETF", "SLV": "Commodity ETF",
+    "USO": "Commodity ETF", "UNG": "Commodity ETF",
+    # International
+    "EEM": "Intl ETF", "FXI": "Intl ETF", "EWZ": "Intl ETF",
+    # ── AI / semis (where most of the 2025–26 gamma flow has lived) ──────
+    "NVDA": "AI/Semi", "AMD": "AI/Semi", "AVGO": "AI/Semi",
+    "TSM": "AI/Semi", "ASML": "AI/Semi", "MU": "AI/Semi",
+    "INTC": "AI/Semi", "MRVL": "AI/Semi", "ARM": "AI/Semi",
+    "QCOM": "AI/Semi", "SMCI": "AI/Semi", "ANET": "AI/Semi",
+    "AI": "AI/Semi", "PLTR": "AI/Semi", "IONQ": "AI/Semi",
+    "RGTI": "AI/Semi", "SOUN": "AI/Semi", "BBAI": "AI/Semi",
+    "PATH": "AI/Semi", "CRWD": "AI/Semi", "NOW": "AI/Semi",
+    "SNOW": "AI/Semi", "DDOG": "AI/Semi",
+    # ── Big tech ─────────────────────────────────────────────────────────
+    "AAPL": "Big Tech", "MSFT": "Big Tech", "GOOGL": "Big Tech",
+    "META": "Big Tech", "AMZN": "Big Tech", "NFLX": "Big Tech",
+    "TSLA": "Big Tech", "ORCL": "Big Tech", "CRM": "Big Tech",
+    "ADBE": "Big Tech", "SHOP": "Big Tech",
+    # ── Fintech / crypto / memestocks ────────────────────────────────────
+    "COIN": "Fintech/Crypto", "MSTR": "Fintech/Crypto",
+    "MARA": "Fintech/Crypto", "RIOT": "Fintech/Crypto",
+    "HOOD": "Fintech/Crypto", "SOFI": "Fintech/Crypto",
+    "AFRM": "Fintech/Crypto", "PYPL": "Fintech/Crypto",
+    "SQ":   "Fintech/Crypto",
+    "GME":  "Memestock", "AMC": "Memestock", "BYND": "Memestock",
+    "RIVN": "Memestock", "LCID": "Memestock", "CVNA": "Memestock",
+    "DKNG": "Memestock", "BABA": "Memestock",
+    # ── Other heavies often in flow ──────────────────────────────────────
+    "BAC": "Financials", "JPM": "Financials", "WFC": "Financials",
+    "BA": "Industrial", "GE": "Industrial", "F": "Auto", "GM": "Auto",
+    "DIS": "Consumer", "NKE": "Consumer", "WBD": "Consumer",
+    "PFE": "Healthcare", "LLY": "Healthcare", "UNH": "Healthcare",
+    "XOM": "Energy", "CVX": "Energy",
+}
+SEED_TICKERS = list(SEED.keys())
 
 CHAIN_FIELDS = (
     "symbol,baseSymbol,baseLastPrice,strikePrice,expirationDate,daysToExpiration,"
@@ -145,18 +185,21 @@ def fetch_most_active(sess: Session, limit: int = 80) -> list[str]:
     )
     data = sess.get_json(f"{PROXY}?{qs}", f"{BC_BASE}/options/most-active/stocks")
     seen: list[str] = []
-    skip_etf = {
-        "SPY", "QQQ", "IWM", "DIA", "HYG", "TLT", "EEM", "XLF", "XLE",
-        "XLK", "XLU", "XLP", "XLV", "XLI", "XLY", "XLB", "XBI", "ARKK",
-        "EWZ", "FXI", "GLD", "SLV", "USO", "UNG", "VXX", "UVXY", "SVXY",
+    # Only skip leveraged / inverse ETFs — they're not real gamma exposure,
+    # they're rebalanced derivatives. Major index, sector, bond, commodity
+    # ETFs are kept because that's where dealer-positioning matters most.
+    skip_leveraged = {
         "SQQQ", "TQQQ", "SPXS", "SPXL", "SOXL", "SOXS", "TZA", "TNA",
-        "BOIL", "KOLD", "GDX", "GDXJ", "FAS", "FAZ", "BITO",
+        "BOIL", "KOLD", "FAS", "FAZ", "UVXY", "SVXY", "VXX", "UPRO",
+        "SPXU", "SDOW", "UDOW", "TMF", "TMV", "DUST", "NUGT", "JNUG",
+        "JDST", "LABU", "LABD", "YINN", "YANG", "ERX", "ERY", "GUSH",
+        "DRIP", "DPST", "WEBL", "WEBS", "BITX", "ETHU",
     }
     for r in data.get("data", []):
         sym = (r.get("baseSymbol") or "").upper().strip()
-        if not sym or sym in seen or sym in skip_etf:
+        if not sym or sym in seen or sym in skip_leveraged:
             continue
-        # Skip indices / odd symbols
+        # Skip indices / odd symbols (we want plain tradable underlyings)
         if not re.fullmatch(r"[A-Z]{1,5}", sym):
             continue
         seen.append(sym)
@@ -218,9 +261,25 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
 
     # Limit to the front 4 expirations — that's where dealer hedging concentrates
     expirations = sorted({c.get("expirationDate", "") for c in chain if c.get("expirationDate")})
-    front = set(expirations[:4])
+    front = expirations[:4]
+    front_set = set(front)
+
+    # Per-expiration DTE lookup (use first row we see for each expiration)
+    dte_by_exp: dict[str, int] = {}
+    for c in chain:
+        e = c.get("expirationDate")
+        if e in front_set and e not in dte_by_exp:
+            try:
+                dte_by_exp[e] = int(_f(c.get("daysToExpiration")))
+            except Exception:
+                pass
 
     by_strike: dict[float, dict[str, float]] = {}
+    by_exp: dict[str, dict[str, float]] = {
+        e: {"call_gex": 0.0, "put_gex": 0.0, "call_oi": 0, "put_oi": 0,
+            "call_vol": 0, "put_vol": 0}
+        for e in front
+    }
     call_gex_total = 0.0
     put_gex_total = 0.0
     call_oi_total = 0
@@ -230,7 +289,8 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
     iv_samples: list[float] = []
 
     for c in chain:
-        if c.get("expirationDate") not in front:
+        exp = c.get("expirationDate")
+        if exp not in front_set:
             continue
         gamma = _f(c.get("gamma"))
         oi = int(_f(c.get("openInterest")))
@@ -251,6 +311,7 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
             {"call_gex": 0.0, "put_gex": 0.0, "call_oi": 0, "put_oi": 0,
              "call_vol": 0, "put_vol": 0},
         )
+        eb = by_exp[exp]
         if is_call:
             call_gex_total += gex_contract
             call_oi_total += oi
@@ -258,6 +319,9 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
             bucket["call_gex"] += gex_contract
             bucket["call_oi"] += oi
             bucket["call_vol"] += vol
+            eb["call_gex"] += gex_contract
+            eb["call_oi"] += oi
+            eb["call_vol"] += vol
         else:
             put_gex_total += gex_contract
             put_oi_total += oi
@@ -265,6 +329,9 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
             bucket["put_gex"] += gex_contract
             bucket["put_oi"] += oi
             bucket["put_vol"] += vol
+            eb["put_gex"] += gex_contract
+            eb["put_oi"] += oi
+            eb["put_vol"] += vol
 
     if not by_strike:
         return None
@@ -347,8 +414,25 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
             "put_oi": int(b["put_oi"]),
         })
 
+    # Per-expiration breakdown (front 4) for the detail drilldown
+    by_expiration = []
+    for e in front:
+        b = by_exp[e]
+        by_expiration.append({
+            "expiration": e,                 # ISO yyyy-mm-dd
+            "dte": dte_by_exp.get(e),
+            "call_gex": round(b["call_gex"], 2),
+            "put_gex":  round(b["put_gex"], 2),
+            "net_gex":  round(b["call_gex"] - b["put_gex"], 2),
+            "call_oi":  int(b["call_oi"]),
+            "put_oi":   int(b["put_oi"]),
+            "call_vol": int(b["call_vol"]),
+            "put_vol":  int(b["put_vol"]),
+        })
+
     return {
         "ticker": ticker,
+        "category": SEED.get(ticker, "Other"),
         "spot": round(spot, 2),
         "score": round(score, 1),
         "net_gex": round(net_gex, 2),
@@ -364,6 +448,10 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
         "call_vol": call_vol_total,
         "put_vol": put_vol_total,
         "avg_iv": round(sum(iv_samples) / len(iv_samples), 4) if iv_samples else None,
+        "expirations": front,                 # front 4, ISO order
+        "dte_min": min(dte_by_exp.values()) if dte_by_exp else None,
+        "dte_max": max(dte_by_exp.values()) if dte_by_exp else None,
+        "by_expiration": by_expiration,
         "top_call_strikes": [
             {k: (round(v, 2) if isinstance(v, float) else v) for k, v in row.items()}
             for row in top_call_strikes
@@ -373,7 +461,6 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
             for row in top_put_strikes
         ],
         "profile": profile,
-        "expirations": sorted(front),
     }
 
 
@@ -382,7 +469,7 @@ def compute_metrics(ticker: str, rows: list[dict[str, Any]]) -> dict[str, Any] |
 # ---------------------------------------------------------------------------
 
 
-def gather(target_count: int = 40, max_universe: int = 50) -> list[dict[str, Any]]:
+def gather(target_count: int = 80, max_universe: int = 90) -> list[dict[str, Any]]:
     sess = Session()
     print("warming up barchart session…", file=sys.stderr)
     sess.warm_up()
@@ -416,7 +503,7 @@ def gather(target_count: int = 40, max_universe: int = 50) -> list[dict[str, Any
             print(f"err: {e}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"err: {e}", file=sys.stderr)
-        time.sleep(0.8)  # be polite — barchart rate-limits aggressively
+        time.sleep(0.6)  # be polite — barchart rate-limits aggressively
 
     results.sort(key=lambda r: r["score"], reverse=True)
     return results

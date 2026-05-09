@@ -216,6 +216,61 @@ h1 {
   text-align: right;
 }
 
+/* ── Category filter bar ────────────────────────────────────────────── */
+.cat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 22px;
+}
+.cat-chip {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+  font-family: inherit;
+}
+.cat-chip:hover { color: var(--text); border-color: var(--border-hi); }
+.cat-chip.active {
+  background: var(--accent);
+  color: #0b0f1a;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.cat-chip .cnt {
+  opacity: 0.6;
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ── Category badges (per card) ─────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.badge[data-cat="Index ETF"]      { color: #5cf2c0; border-color: rgba(92,242,192,.4); }
+.badge[data-cat="Sector ETF"]     { color: #8ed1ff; border-color: rgba(142,209,255,.4); }
+.badge[data-cat="Bond ETF"]       { color: #c8a8ff; border-color: rgba(200,168,255,.4); }
+.badge[data-cat="Commodity ETF"]  { color: #ffd166; border-color: rgba(255,209,102,.4); }
+.badge[data-cat="Intl ETF"]       { color: #ff9f47; border-color: rgba(255,159,71,.4); }
+.badge[data-cat="AI/Semi"]        { color: #ff80df; border-color: rgba(255,128,223,.4); }
+.badge[data-cat="Big Tech"]       { color: #5cf2c0; border-color: rgba(92,242,192,.4); }
+.badge[data-cat="Fintech/Crypto"] { color: #ffd166; border-color: rgba(255,209,102,.4); }
+.badge[data-cat="Memestock"]      { color: #ff5c7a; border-color: rgba(255,92,122,.4); }
+
 /* ── Cards grid ─────────────────────────────────────────────────────── */
 .cards {
   display: grid;
@@ -250,7 +305,7 @@ h1 {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   gap: 12px;
 }
 .card .ticker {
@@ -263,6 +318,18 @@ h1 {
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 14px;
+}
+.card .meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.card .exp-range {
+  color: var(--text-faint);
+  font-family: var(--mono);
 }
 
 .score {

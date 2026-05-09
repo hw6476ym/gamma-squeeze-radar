@@ -7,8 +7,16 @@ const STATE = {
   sortKey: "score",
   search: "",
   minScore: 0,
+  category: "All",
   chart: null,
 };
+
+const CAT_ORDER = [
+  "All", "Index ETF", "Sector ETF", "Bond ETF", "Commodity ETF",
+  "Intl ETF", "AI/Semi", "Big Tech", "Fintech/Crypto", "Memestock",
+  "Financials", "Industrial", "Auto", "Consumer", "Healthcare",
+  "Energy", "Other",
+];
 
 // ── helpers ────────────────────────────────────────────────────────────
 const fmt = {
@@ -25,6 +33,20 @@ const fmt = {
   num: (v, d = 2) => v == null ? "—" : v.toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}),
   int: (v) => v == null ? "—" : Math.round(v).toLocaleString(),
 };
+
+function fmtDate(iso) {
+  // input: "2026-05-16" → "May 16"
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00Z");
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function fmtTimestamp(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
 
 function ago(iso) {
   const t = new Date(iso).getTime();
@@ -51,6 +73,9 @@ function render() {
   }
   if (STATE.minScore > 0) {
     list = list.filter((t) => t.score >= STATE.minScore);
+  }
+  if (STATE.category !== "All") {
+    list = list.filter((t) => (t.category || "Other") === STATE.category);
   }
 
   const dirAsc = STATE.sortKey === "ticker" || STATE.sortKey === "distance_to_wall_pct";
@@ -86,11 +111,23 @@ function card(t, rank) {
   const dist = t.distance_to_wall_pct;
   const distCls = dist == null ? "" : dist >= 0 && dist <= 6 ? "pos" : dist < 0 ? "neg" : "";
 
+  const cat = t.category || "Other";
+  const expRange = (t.expirations && t.expirations.length)
+    ? `exp ${fmtDate(t.expirations[0])} – ${fmtDate(t.expirations[t.expirations.length - 1])}`
+    : "";
+  const dteRange = (t.dte_min != null && t.dte_max != null)
+    ? `${t.dte_min}–${t.dte_max}d`
+    : "";
+
   el.innerHTML = `
     <span class="rank">#${rank}</span>
     <div class="top">
       <div class="ticker">${t.ticker}</div>
       <div class="price">${fmt.money(t.spot)}</div>
+    </div>
+    <div class="meta-row">
+      <span class="badge" data-cat="${cat}">${cat}</span>
+      <span class="exp-range">${expRange} · ${dteRange}</span>
     </div>
 
     <div class="score">
@@ -168,10 +205,25 @@ function renderDetail(t) {
     </tr>
   `).join("");
 
+  const cat = t.category || "Other";
+  const expirationRows = (t.by_expiration || []).map((e) => `
+    <tr>
+      <td>${fmtDate(e.expiration)} <span class="dim">(${e.dte ?? "—"}d)</span></td>
+      <td class="${e.net_gex >= 0 ? 'pos' : 'neg'}">${(e.net_gex >= 0 ? "+" : "") + fmt.short(e.net_gex)}</td>
+      <td class="pos">+${fmt.short(e.call_gex)}</td>
+      <td class="neg">−${fmt.short(e.put_gex)}</td>
+      <td>${fmt.short(e.call_oi)}</td>
+      <td>${fmt.short(e.put_oi)}</td>
+      <td>${fmt.short(e.call_vol)}</td>
+      <td>${fmt.short(e.put_vol)}</td>
+    </tr>
+  `).join("");
+
   return `
   <div class="detail-body">
     <div class="detail-head">
       <span class="ticker">${t.ticker}</span>
+      <span class="badge" data-cat="${cat}">${cat}</span>
       <span class="price">${fmt.money(t.spot)}</span>
       <span class="score-pill">score ${t.score.toFixed(0)} / 100</span>
     </div>
@@ -187,8 +239,19 @@ function renderDetail(t) {
       <div class="metric"><div class="k">Avg IV (front 4)</div><div class="v">${t.avg_iv ? (t.avg_iv * 100).toFixed(1) + "%" : "—"}</div></div>
     </div>
 
-    <div class="section-title">Gamma profile (front 4 expirations, ±25% of spot)</div>
+    <div class="section-title">Gamma profile by strike (front 4 expirations, ±25% of spot)</div>
     <div class="chart-wrap"><canvas id="chartCanvas"></canvas></div>
+
+    <div class="section-title">GEX broken down by expiration date</div>
+    <table class="strikes-table" style="margin-bottom:18px;">
+      <thead>
+        <tr>
+          <th>Expiration</th><th>Net GEX</th><th>Call γ</th><th>Put γ</th>
+          <th>Call OI</th><th>Put OI</th><th>Call Vol</th><th>Put Vol</th>
+        </tr>
+      </thead>
+      <tbody>${expirationRows || `<tr><td colspan="8" class="dim">no data</td></tr>`}</tbody>
+    </table>
 
     <div style="display:grid; gap:18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
       <div>
@@ -208,7 +271,7 @@ function renderDetail(t) {
     </div>
 
     <p class="dim" style="font-size:12px; margin-top:18px;">
-      Expirations included: ${(t.expirations || []).join(" · ") || "—"}.
+      Front 4 expirations: ${(t.expirations || []).map(fmtDate).join(" · ") || "—"}.
       <br/>GEX values are ≈ Σ contract gamma × OI × 100 × spot² × 1%, the dollar-delta
       market-makers must hedge per 1% spot move (positive = dealers long gamma).
     </p>
@@ -313,9 +376,24 @@ async function boot() {
   }
 
   document.getElementById("updated").textContent =
-    "updated " + ago(STATE.raw.generated_at);
+    "data as of " + fmtTimestamp(STATE.raw.generated_at) + " (" + ago(STATE.raw.generated_at) + ")";
   document.getElementById("ticker-count").textContent =
     `${STATE.raw.ticker_count} tickers`;
+
+  // Show the range of *nearest* expirations across the dataset — that's the
+  // front edge of dealer-hedging windows people actually care about.
+  const firsts = STATE.raw.tickers
+    .map((t) => (t.expirations || [])[0])
+    .filter(Boolean)
+    .sort();
+  if (firsts.length) {
+    document.getElementById("exp-window").textContent =
+      `nearest exp: ${fmtDate(firsts[0])} → ${fmtDate(firsts[firsts.length - 1])}`;
+  } else {
+    document.getElementById("exp-window").remove();
+  }
+
+  renderCategories();
 
   // wire controls
   document.getElementById("search").addEventListener("input", (e) => {
@@ -347,6 +425,34 @@ async function boot() {
   });
 
   render();
+}
+
+function renderCategories() {
+  const bar = document.getElementById("catBar");
+  if (!bar) return;
+  // Tally categories present in the data
+  const counts = new Map();
+  STATE.raw.tickers.forEach((t) => {
+    const c = t.category || "Other";
+    counts.set(c, (counts.get(c) || 0) + 1);
+  });
+  // Order: All first, then categories present, in canonical order, then any extras
+  const cats = ["All"];
+  CAT_ORDER.slice(1).forEach((c) => { if (counts.has(c)) cats.push(c); });
+  Array.from(counts.keys()).forEach((c) => { if (!cats.includes(c)) cats.push(c); });
+
+  bar.innerHTML = cats.map((c) => {
+    const n = c === "All" ? STATE.raw.tickers.length : (counts.get(c) || 0);
+    return `<button class="cat-chip${c === STATE.category ? ' active' : ''}" data-cat="${c}">${c}<span class="cnt">${n}</span></button>`;
+  }).join("");
+
+  bar.querySelectorAll(".cat-chip").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      STATE.category = btn.dataset.cat;
+      bar.querySelectorAll(".cat-chip").forEach((b) => b.classList.toggle("active", b === btn));
+      render();
+    });
+  });
 }
 
 document.addEventListener("DOMContentLoaded", boot);
