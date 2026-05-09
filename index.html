@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0f1a" />
+<title>Gamma Squeeze Radar — live dealer-positioning dashboard</title>
+<meta name="description" content="A live dashboard of stocks with the highest gamma-squeeze potential, ranked by dealer positioning, call-wall proximity, and options flow." />
+<meta property="og:title" content="Gamma Squeeze Radar" />
+<meta property="og:description" content="Live ranking of stocks with the highest gamma-squeeze potential." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <span class="bolt" aria-hidden="true">⚡</span>
+      <div>
+        <h1>Gamma Squeeze Radar</h1>
+        <p class="subtitle">Live ranking of stocks where dealer positioning is set up for a gamma squeeze.</p>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="meta-pill" id="updated">loading…</div>
+      <div class="meta-pill ghost" id="ticker-count">— tickers</div>
+      <a class="gh" href="https://github.com/" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        view source
+      </a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="explainer">
+    <details>
+      <summary><b>What is a gamma squeeze?</b> <span class="hint">click to expand</span></summary>
+      <div class="explainer-body">
+        <p>When traders buy out-of-the-money <b>call options</b>, the market-makers who sold those calls go <i>short gamma</i>. As the underlying stock rallies toward those strikes, the dealers' delta hedge balloons — they have to keep buying the stock to stay flat. Buying begets buying, the spot price gets sucked toward the largest call-gamma strike (the <b>call wall</b>), and a feedback loop kicks in: that's a <b>gamma squeeze</b>.</p>
+        <p>This dashboard scrapes live options-chain data, computes per-strike gamma exposure (GEX) for the front 4 expirations, and ranks tickers by a heuristic <b>squeeze score</b> that combines:</p>
+        <ul>
+          <li><b>Call-vs-put gamma dominance</b> — short-dated dealer hedging is one-sided</li>
+          <li><b>Distance to the call wall</b> — squeeze leverage peaks ~3% below the wall</li>
+          <li><b>Volume / open-interest burst</b> — fresh positioning, not stale OI</li>
+          <li><b>Implied-volatility level</b> — vega-paranoid dealers hedge harder</li>
+        </ul>
+        <p class="warn">⚠️ <b>Not financial advice.</b> This is an educational visualization of public options data. Squeeze setups can dissipate in hours and small-float names are particularly volatile. Do your own work.</p>
+      </div>
+    </details>
+  </section>
+
+  <section class="controls">
+    <div class="search">
+      <input id="search" type="search" placeholder="Search ticker… (e.g. GME)" autocomplete="off" />
+    </div>
+    <div class="sort">
+      <label for="sort">Sort by</label>
+      <select id="sort">
+        <option value="score">Squeeze score</option>
+        <option value="net_gex">Net GEX</option>
+        <option value="call_put_ratio">Call/put gamma ratio</option>
+        <option value="distance_to_wall_pct">Closest to call wall</option>
+        <option value="call_vol">Call volume</option>
+        <option value="ticker">Ticker (A→Z)</option>
+      </select>
+    </div>
+    <div class="filter">
+      <label for="minScore">Min score</label>
+      <input id="minScore" type="range" min="0" max="100" value="0" />
+      <span id="minScoreVal">0</span>
+    </div>
+  </section>
+
+  <section id="cards" class="cards" aria-live="polite"></section>
+
+  <section class="callout" id="emptyState" hidden>
+    <h2>No tickers match those filters.</h2>
+    <p>Try lowering the minimum score or clearing the search box.</p>
+  </section>
+
+</main>
+
+<dialog id="detail" class="detail-modal">
+  <button class="close" aria-label="Close">×</button>
+  <div id="detailBody"></div>
+</dialog>
+
+<footer class="foot">
+  <div class="wrap">
+    <div>
+      Data via <a href="https://www.barchart.com/options/most-active/stocks" target="_blank" rel="noopener">barchart.com</a> public proxy. Updated when the scraper runs (<code>python scripts/scrape.py</code>).
+    </div>
+    <div class="disclaimer">For education only. Past dealer positioning is not predictive. <i>Don't blow up.</i></div>
+  </div>
+</footer>
+
+<script src="assets/app.js" defer></script>
+</body>
+</html>
