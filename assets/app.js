@@ -9,6 +9,13 @@ const STATE = {
   minScore: 0,
   category: "All",
   chart: null,
+  // live polling
+  pollHandle: null,
+  countdownHandle: null,
+  pollIntervalSec: 60,
+  nextPollAt: 0,
+  isFetching: false,
+  consecutiveFailures: 0,
 };
 
 const CAT_ORDER = [
@@ -360,40 +367,188 @@ function buildChart(t) {
   });
 }
 
-// ── boot ───────────────────────────────────────────────────────────────
-async function boot() {
-  try {
-    const r = await fetch("data/data.json", { cache: "no-store" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    STATE.raw = await r.json();
-  } catch (e) {
-    document.getElementById("cards").innerHTML = `
-      <div class="callout">
-        <h2>Couldn't load data.json</h2>
-        <p>Run <code>python scripts/scrape.py</code> to generate it. (${e.message})</p>
-      </div>`;
-    return;
-  }
+// ── data sources ───────────────────────────────────────────────────────
+// `mode` flips on first successful response and sticks for the session.
+const SOURCE = { mode: "auto", liveTried: false };
 
+async function fetchLiveOrStatic() {
+  // 1) Try the live serverless endpoint (Vercel deploy).
+  if (SOURCE.mode === "auto" || SOURCE.mode === "live") {
+    try {
+      const r = await fetch("/api/scrape?t=" + Date.now(), {
+        cache: "no-store",
+        signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
+      });
+      if (r.ok) {
+        SOURCE.mode = "live";
+        return await r.json();
+      }
+      // 404 = static host; lock to static for the rest of the session
+      if (r.status === 404) SOURCE.mode = "static";
+    } catch (_e) {
+      if (SOURCE.mode === "auto") SOURCE.mode = "static";
+    }
+  }
+  // 2) Static snapshot
+  const r = await fetch("data/data.json?t=" + Date.now(), { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (SOURCE.mode === "auto") SOURCE.mode = "static";
+  return await r.json();
+}
+
+// ── live polling ───────────────────────────────────────────────────────
+
+async function fetchData({ manual = false } = {}) {
+  if (STATE.isFetching) return;
+  STATE.isFetching = true;
+  setLiveState("refreshing", manual ? "fetching now…" : "checking…");
+  const btn = document.getElementById("refreshBtn");
+  if (btn) btn.disabled = true;
+
+  try {
+    // Two-tier source: try the live serverless endpoint first (Vercel /api/scrape).
+    // If it 404s — i.e. we're on GitHub Pages or anywhere static — fall back to
+    // the snapshot JSON the cron job commits.
+    const fresh = await fetchLiveOrStatic();
+    const wasNew = !STATE.raw || fresh.generated_at !== STATE.raw.generated_at;
+    STATE.raw = fresh;
+    STATE.consecutiveFailures = 0;
+
+    paintHeader();
+    paintCategories();
+    render();
+
+    if (wasNew && !manual) {
+      flashUpdated();
+    }
+  } catch (e) {
+    STATE.consecutiveFailures += 1;
+    console.error("data fetch failed:", e);
+    if (!STATE.raw) {
+      // first-load failure
+      document.getElementById("cards").innerHTML = `
+        <div class="callout">
+          <h2>Couldn't load data.json</h2>
+          <p>Run <code>python scripts/scrape.py</code> to generate it. (${e.message})</p>
+        </div>`;
+    }
+  } finally {
+    STATE.isFetching = false;
+    if (btn) btn.disabled = false;
+    armNextPoll();
+  }
+}
+
+function armNextPoll() {
+  // Adaptive: back off if we're failing, go faster on user focus
+  let interval = STATE.pollIntervalSec;
+  if (STATE.consecutiveFailures > 0) {
+    interval = Math.min(300, interval * Math.pow(2, STATE.consecutiveFailures));
+  }
+  STATE.nextPollAt = Date.now() + interval * 1000;
+  if (STATE.pollHandle) clearTimeout(STATE.pollHandle);
+  STATE.pollHandle = setTimeout(() => fetchData(), interval * 1000);
+}
+
+function startCountdown() {
+  if (STATE.countdownHandle) clearInterval(STATE.countdownHandle);
+  STATE.countdownHandle = setInterval(() => {
+    if (STATE.isFetching) return;
+    const remaining = Math.max(0, Math.floor((STATE.nextPollAt - Date.now()) / 1000));
+    const tag = SOURCE.mode === "live" ? "on-demand" : "snapshot";
+    setLiveState("ok", `live (${tag}) · next in ${remaining}s`);
+    // Re-paint relative timestamp every second
+    if (STATE.raw) {
+      const el = document.getElementById("updated");
+      if (el && !el.dataset.flashing) {
+        el.textContent = "data as of " + fmtTimestamp(STATE.raw.generated_at) +
+          " (" + ago(STATE.raw.generated_at) + ")";
+      }
+    }
+  }, 1000);
+}
+
+function setLiveState(kind, label) {
+  const dot = document.getElementById("liveDot");
+  const txt = document.getElementById("liveLabel");
+  if (!dot || !txt) return;
+  dot.classList.remove("refreshing", "stale", "ok");
+  if (kind === "refreshing") dot.classList.add("refreshing");
+  if (kind === "stale") dot.classList.add("stale");
+  if (label) txt.textContent = label;
+}
+
+function flashUpdated() {
+  const el = document.getElementById("updated");
+  if (!el) return;
+  el.dataset.flashing = "1";
+  const prevColor = el.style.color;
+  el.style.transition = "color 0.4s, background 0.4s";
+  el.style.color = "#0b0f1a";
+  el.style.background = "#5cf2c0";
+  setTimeout(() => {
+    el.style.color = prevColor;
+    el.style.background = "";
+    delete el.dataset.flashing;
+  }, 1200);
+}
+
+// ── header / category render (split out for reuse on poll) ─────────────
+function paintHeader() {
   document.getElementById("updated").textContent =
     "data as of " + fmtTimestamp(STATE.raw.generated_at) + " (" + ago(STATE.raw.generated_at) + ")";
   document.getElementById("ticker-count").textContent =
     `${STATE.raw.ticker_count} tickers`;
 
-  // Show the range of *nearest* expirations across the dataset — that's the
-  // front edge of dealer-hedging windows people actually care about.
   const firsts = STATE.raw.tickers
     .map((t) => (t.expirations || [])[0])
     .filter(Boolean)
     .sort();
-  if (firsts.length) {
-    document.getElementById("exp-window").textContent =
-      `nearest exp: ${fmtDate(firsts[0])} → ${fmtDate(firsts[firsts.length - 1])}`;
-  } else {
-    document.getElementById("exp-window").remove();
+  const expEl = document.getElementById("exp-window");
+  if (expEl) {
+    if (firsts.length) {
+      expEl.textContent =
+        `nearest exp: ${fmtDate(firsts[0])} → ${fmtDate(firsts[firsts.length - 1])}`;
+    } else {
+      expEl.remove();
+    }
   }
+}
+
+function paintCategories() {
+  // Re-render only if the set of categories changed (rare). Otherwise leave alone
+  // so the user's active selection sticks.
+  const bar = document.getElementById("catBar");
+  if (!bar) return;
+  if (bar.childElementCount === 0) renderCategories();
+}
+
+// ── boot ───────────────────────────────────────────────────────────────
+async function boot() {
+  // Initial load (also paints header etc. via fetchData → paintHeader)
+  await fetchData({ manual: true });
+  if (!STATE.raw) return; // initial load failed, error already shown
 
   renderCategories();
+  startCountdown();
+
+  // refresh button
+  const refreshBtn = document.getElementById("refreshBtn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => fetchData({ manual: true }));
+  }
+
+  // pause polling when tab is hidden, resume on focus and immediately refetch
+  // if we've been away long enough that the data is probably stale
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (STATE.pollHandle) clearTimeout(STATE.pollHandle);
+      setLiveState("stale", "paused (tab inactive)");
+    } else {
+      // Refetch immediately if more than half an interval has passed
+      fetchData();
+    }
+  });
 
   // wire controls
   document.getElementById("search").addEventListener("input", (e) => {

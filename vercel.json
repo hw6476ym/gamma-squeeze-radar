@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/scrape.py": {
+      "maxDuration": 60,
+      "memory": 512
+    }
+  },
+  "headers": [
+    {
+      "source": "/data/data.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=60" }
+      ]
+    }
+  ]
+}

@@ -48,26 +48,48 @@ python -m http.server 5173
 
 No build step. No dependencies beyond the Python standard library.
 
-## Deployment
+## How "live" is the live data?
 
-The site is plain HTML/CSS/JS so any static host works. This repo is configured for **GitHub Pages** out of the box — pushing to `main` publishes automatically.
+The dashboard auto-polls every 60 seconds and shows a countdown + manual refresh button in the header. There are two source modes the front-end picks between automatically:
 
-A daily GitHub Action (`.github/workflows/refresh.yml`) re-runs the scraper and commits a fresh `data/data.json` so the live site stays current without manual intervention.
+| Mode | Source | Freshness | How to deploy |
+|---|---|---|---|
+| **Snapshot** *(default)* | committed `data/data.json` refreshed by GitHub Actions cron | every 10 min during US market hours, 30 min around the open/close, 1×/day on weekends | push to `main` — GitHub Pages auto-publishes |
+| **On-demand** | Vercel serverless function `/api/scrape` | fresh on every request (5-min in-memory cache to be polite to barchart) | one-click deploy below |
+
+The header pill tells you which mode you're in: `live (snapshot)` vs `live (on-demand)`.
+
+### Deploying to GitHub Pages (snapshot mode)
+
+Out of the box. Push to `main`; the `.github/workflows/pages.yml` action publishes. The `.github/workflows/refresh.yml` action re-scrapes on the cron schedule above and commits the new `data/data.json`.
+
+### Deploying to Vercel (true on-demand mode)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhw6476ym%2Fgamma-squeeze-radar)
+
+The `api/scrape.py` Python serverless function runs the scraper on every request (or returns a cached payload if one was generated within the last 5 min). The front-end auto-detects the endpoint — no code changes needed. Tunable env vars:
+
+- `SCRAPE_TTL_SEC` — cache TTL in seconds (default 300)
+- `SCRAPE_LIMIT`   — how many tickers to fetch per request (default 30; bump if your plan allows longer execution windows)
 
 ## Architecture
 
 ```
 gamma-squeeze-radar/
-├── index.html          # entry point
+├── index.html              # entry point
 ├── assets/
-│   ├── styles.css      # dark theme, no framework
-│   └── app.js          # vanilla JS, Chart.js for the gamma-profile chart
+│   ├── styles.css          # dark theme, no framework
+│   └── app.js              # vanilla JS, Chart.js, auto-poll + source autodetect
 ├── data/
-│   └── data.json       # scraped + computed payload (committed)
+│   └── data.json           # scraped + computed payload (committed; snapshot mode)
 ├── scripts/
-│   └── scrape.py       # barchart proxy scraper + GEX math
+│   └── scrape.py           # barchart proxy scraper + GEX math (CLI + import)
+├── api/
+│   └── scrape.py           # Vercel serverless wrapper (on-demand mode)
+├── vercel.json             # Vercel config (memory + duration for the function)
 └── .github/workflows/
-    └── refresh.yml     # daily refresh job
+    ├── pages.yml           # publish to GitHub Pages on push to main
+    └── refresh.yml         # cron-driven scrape: every 10 min during market hours
 ```
 
 ## Caveats and limits

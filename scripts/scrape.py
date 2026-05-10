@@ -509,17 +509,26 @@ def gather(target_count: int = 80, max_universe: int = 90) -> list[dict[str, Any
     return results
 
 
-def main() -> int:
-    results = gather()
-    payload = {
+def gather_payload(target_count: int = 80, max_universe: int = 90) -> dict[str, Any]:
+    """Run the full scrape and return the payload dict (no file I/O).
+
+    Used by both the CLI entrypoint and the optional serverless /api/scrape
+    endpoint so they can never drift apart.
+    """
+    results = gather(target_count=target_count, max_universe=max_universe)
+    return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": "barchart.com (public proxy)",
         "ticker_count": len(results),
         "tickers": results,
     }
+
+
+def main() -> int:
+    payload = gather_payload()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"\nwrote {OUT} ({OUT.stat().st_size:,} bytes, {len(results)} tickers)")
+    print(f"\nwrote {OUT} ({OUT.stat().st_size:,} bytes, {payload['ticker_count']} tickers)")
     return 0
 
 

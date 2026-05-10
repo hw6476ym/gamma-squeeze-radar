@@ -94,8 +94,42 @@ h1 {
   font-size: 12px;
   color: var(--text-dim);
   font-family: var(--mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .meta-pill.ghost { background: transparent; }
+
+.meta-pill.live { color: var(--accent); border-color: rgba(92,242,192,0.35); }
+.meta-pill.live .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(92,242,192,0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.meta-pill.live.refreshing .dot { animation: spin 0.7s linear infinite; background: var(--accent-2); box-shadow: 0 0 8px rgba(255,209,102,0.7); }
+.meta-pill.live.stale  .dot {
+  background: var(--text-faint);
+  box-shadow: none;
+  animation: none;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.refresh-btn {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  transition: color .15s, border-color .15s;
+}
+.refresh-btn:hover { color: var(--text); border-color: var(--border-hi); }
+.refresh-btn:disabled { opacity: 0.5; cursor: wait; }
 .gh {
   display: inline-flex;
   align-items: center;

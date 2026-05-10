@@ -2,8 +2,18 @@ name: refresh-gamma-data
 
 on:
   schedule:
-    # 21:30 UTC = 5:30pm ET, 30min after the US close
+    # US market hours = 13:30–20:00 UTC Mon–Fri (9:30am–4:00pm ET, ignoring DST drift).
+    # GitHub cron does not have a "minute interval" syntax, so we list explicit
+    # times. Every 10 min during the cash session + a few wider passes around it.
+    - cron: "30,40,50 13 * * 1-5"
+    - cron: "*/10 14-19 * * 1-5"
+    - cron: "0,10,20 20 * * 1-5"
+    # Pre-market sanity pass (~1hr before open)
+    - cron: "30 12 * * 1-5"
+    # Post-close definitive snapshot
     - cron: "30 21 * * 1-5"
+    # Weekend nudge so weekend visitors see fresh-ish data
+    - cron: "0 14 * * 0,6"
   workflow_dispatch: {}
 
 permissions:
